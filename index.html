@@ -1,0 +1,1385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080808">
+  <title>LOCKHEAD Terminal</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090a0d;
+      --fg: #ececf0;
+      --dim: #a1a1aa;
+      --bright: #ffffff;
+      --amber: #c9c9cf;
+      --line: #292a31;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; background: var(--bg); }
+    body { color: var(--fg); overflow: hidden; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .boot-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: min(7vh, 60px) 20px 30px;
+      overflow: auto;
+      background: #07080a;
+      color: var(--amber);
+      transition: opacity .55s ease;
+    }
+    .boot-screen.leaving { opacity: 0; pointer-events: none; }
+    .boot-content { width: min(900px, 100%); }
+    .boot-art {
+      margin: 0 0 24px;
+      color: #d4d4da;
+      font-size: clamp(8px, 1.65vw, 15px);
+      line-height: 1.13;
+      white-space: pre;
+      text-shadow: 0 0 9px #ffffff18;
+    }
+    .boot-lines { min-height: 120px; white-space: pre-wrap; line-height: 1.8; }
+    .boot-cursor { display: inline-block; animation: blink 1s steps(2, start) infinite; }
+
+    .terminal {
+      height: 100dvh;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    .titlebar {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--dim);
+      font-size: 12px;
+      letter-spacing: .04em;
+    }
+    .titlemark { color: var(--bright); font-weight: 500; }
+    .spacer { flex: 1; }
+    .tool-button {
+      border: 0;
+      background: transparent;
+      padding: 6px 7px;
+      color: var(--dim);
+      cursor: pointer;
+    }
+    .tool-button:hover, .tool-button:focus-visible { color: var(--bright); background: #1b1c22; outline: none; border-radius: 8px; }
+    .screen {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 22px clamp(14px, 4vw, 48px) 12px;
+      scrollbar-color: #30363d #0b0e11;
+      scrollbar-width: thin;
+    }
+    .output {
+      max-width: none;
+      margin: 0;
+      font-size: clamp(12px, 1.45vw, 14px);
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+    .line { min-height: 1.65em; white-space: pre-wrap; }
+    .line.muted { color: var(--dim); }
+    .line.good { color: #c1eaa0; }
+    .line.warn { color: #f1c85a; }
+    .line.error { color: #ff7379; }
+    .line.prompt-line { color: #eee2e2; }
+    .line a { color: var(--bright); }
+    .ascii { color: var(--bright); line-height: 1.12; white-space: pre; }
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      max-width: none;
+      width: 100%;
+      margin: 14px 0 0;
+      padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+      border-top: 1px solid #252b33;
+      color: var(--bright);
+    }
+    .prompt { white-space: nowrap; font-size: 13px; }
+    #command-input {
+      min-width: 0;
+      flex: 1;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: #c9d1d9;
+      caret-color: var(--bright);
+      font-size: 14px;
+    }
+    #command-input::placeholder { color: #6e7681; }
+    .statusbar {
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 16px;
+      border-top: 1px solid #252b33;
+      color: #6e7681;
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .statusbar .status { color: var(--dim); }
+
+    .panel {
+      position: fixed;
+      inset: 50px 14px 28px;
+      z-index: 5;
+      display: none;
+      flex-direction: column;
+      background: #0c0d11;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .panel.open { display: flex; }
+    .panel-toolbar {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-toolbar button {
+      padding: 6px 10px;
+      border: 1px solid #30363d;
+      background: #161b22;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .panel-toolbar button:hover { background: #21262d; }
+    .panel-url { flex: 1; min-width: 0; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .browser-tabs {
+      display: flex;
+      align-items: end;
+      gap: 3px;
+      min-height: 36px;
+      overflow-x: auto;
+      padding: 5px 8px 0;
+      border-bottom: 1px solid var(--line);
+      scrollbar-width: thin;
+    }
+    .browser-tab {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+      max-width: 220px;
+      border: 1px solid #303036;
+      border-radius: 8px;
+      border-bottom: 0;
+      background: #161b22;
+      color: var(--dim);
+      font-size: 12px;
+    }
+    .browser-tab.active { background: #21262d; color: var(--bright); }
+    .browser-tab-select { min-width: 0; padding: 7px 0 7px 10px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+    .browser-tab-close { border: 0; padding: 7px 9px 7px 0; background: transparent; color: inherit; cursor: pointer; }
+    .browser-new-tab { padding: 5px 11px; border: 0; background: transparent; color: var(--bright); cursor: pointer; }
+    .browser-address {
+      flex: 1;
+      min-width: 60px;
+      border: 1px solid #303036;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #0b0e11;
+      color: #eee2e2;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    .browser-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+    .browser-page { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .browser-page.active { display: flex; }
+    .browser-frame { display: none; flex: 1; width: 100%; border: 0; background: #080808; }
+    .browser-frame.visible { display: block; }
+    .repo-view { flex: 1; min-height: 0; overflow: auto; padding: clamp(14px, 3vw, 32px); color: #d7cdcd; font-size: 13px; line-height: 1.65; }
+    .repo-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #30363d; }
+    .repo-heading h2 { margin: 0; color: var(--bright); font-size: 17px; font-weight: 500; }
+    .repo-heading span, .repo-message { color: var(--dim); }
+    .repo-list { max-width: 1000px; margin: 14px auto; border: 1px solid #30363d; }
+    .repo-entry { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #252b33; }
+    .repo-entry:last-child { border-bottom: 0; }
+    .repo-entry:hover { background: #161b22; }
+    .repo-entry-name { flex: 1; border: 0; background: transparent; color: #c9d1d9; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .repo-entry-name:hover { color: var(--bright); text-decoration: underline; }
+    .repo-entry-meta { color: #78545a; font-size: 11px; }
+    .repo-entry-new { border: 0; background: transparent; color: var(--dim); cursor: pointer; }
+    .repo-entry-new:hover { color: var(--bright); }
+    .repo-file { max-width: 1000px; margin: 18px auto; }
+    .repo-file pre { overflow: auto; padding: 14px; border: 1px solid #30363d; border-radius: 10px; background: #080a0c; color: #c9d1d9; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .repo-link { color: var(--bright); }
+    .repo-loading { color: var(--amber); }
+    .stock-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #0b0e11; }
+    .stock-disclaimer { margin: 0; padding: 7px 12px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; }
+    .arch-landing { max-width: 900px; margin: 0 auto 20px; padding: clamp(18px, 4vw, 36px); border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(145deg, #14151a, #0d0e12); }
+    .arch-kicker { color: var(--dim); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+    .arch-landing h1 { margin: 10px 0; color: #fff; font-size: clamp(28px, 5vw, 44px); font-weight: 600; letter-spacing: -.04em; }
+    .arch-landing p { max-width: 680px; color: #c1c1c9; line-height: 1.7; }
+    .arch-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .arch-action { display: inline-flex; align-items: center; padding: 9px 13px; border: 1px solid #383941; border-radius: 9px; background: #1a1b21; color: #f4f4f6; cursor: pointer; text-decoration: none; }
+    .arch-action:hover { background: #25262e; }
+    .about-panel { justify-content: center; align-items: center; padding: 18px; }
+    .about-card { width: min(620px, 100%); padding: clamp(20px, 5vw, 36px); border: 1px solid #30313a; border-radius: 18px; background: #121319; box-shadow: 0 24px 80px #0009; }
+    .about-card h1 { margin: 0 0 8px; color: #fff; font-size: 28px; letter-spacing: -.04em; }
+    .about-card p { color: #b8b8c2; line-height: 1.7; }
+    .about-card .about-meta { color: var(--dim); font-size: 12px; }
+    .about-card a { color: #fff; }
+    .about-card button { margin-top: 12px; }
+    .game-wrap { flex: 1; display: grid; place-items: center; padding: 16px; }
+    .game-card { width: min(520px, 100%); padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: #101116; text-align: center; }
+    .game-card h2 { color: var(--bright); font-size: 18px; font-weight: 500; }
+    #snake-canvas { width: min(420px, 100%); height: auto; border: 1px solid #30363d; background: #090909; image-rendering: pixelated; }
+    .game-help { color: var(--dim); font-size: 12px; line-height: 1.8; }
+    .game-score { color: #c1eaa0; }
+
+    .fx-overlay {
+      position: fixed;
+      inset: 42px 0 24px;
+      z-index: 8;
+      display: none;
+      overflow: hidden;
+      padding: clamp(14px, 4vw, 48px);
+      background: #080b09f5;
+      color: #8ce99a;
+      text-shadow: 0 0 5px #5eff7622;
+      pointer-events: none;
+    }
+    .fx-overlay.active { display: block; }
+    .fx-overlay.glitch { animation: glitch .35s steps(2, end) infinite; }
+    .fx-content { max-width: 1000px; margin: auto; }
+    .fx-title { margin: 0 0 12px; color: #c9d1d9; font-size: clamp(14px, 2vw, 18px); font-weight: 500; }
+    .fx-log { height: min(62vh, 500px); overflow: hidden; white-space: pre-wrap; line-height: 1.55; font-size: clamp(11px, 1.4vw, 14px); }
+    .fx-success { color: #8ce99a; font-size: clamp(16px, 3vw, 24px); }
+    .matrix-rain { position: fixed; inset: 42px 0 24px; z-index: 7; display: none; background: #000c; pointer-events: none; }
+    .matrix-rain.active { display: block; }
+    .matrix-rain canvas { width: 100%; height: 100%; }
+    .welcome-screen {
+      position: fixed;
+      inset: 42px 0 24px;
+      z-index: 4;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: #0b0e11;
+      text-align: center;
+    }
+    .welcome-screen.open { display: flex; }
+    .welcome-inner { width: min(700px, 100%); }
+    .welcome-inner pre { color: var(--bright); font-size: clamp(8px, 1.5vw, 13px); line-height: 1.12; overflow: hidden; }
+    .welcome-inner p { color: var(--dim); }
+    .welcome-inner button {
+      margin-top: 10px;
+      border: 1px solid #30363d;
+      background: transparent;
+      padding: 10px 18px;
+      color: var(--bright);
+      cursor: pointer;
+    }
+    @keyframes blink { to { visibility: hidden; } }
+    @keyframes glitch {
+      0% { transform: translate(0); filter: hue-rotate(0); }
+      25% { transform: translate(1px, 0); }
+      50% { transform: translate(-1px, 0); }
+      75% { transform: translate(0, 1px); }
+    }
+    @media (max-width: 560px) {
+      .titlebar { padding: 0 9px; gap: 4px; }
+      .screen { padding-top: 14px; }
+      .titlebar .tool-button { padding: 6px 5px; font-size: 11px; }
+      .statusbar { gap: 8px; padding: 0 9px; font-size: 9px; }
+      .panel-toolbar { padding: 0 6px; gap: 4px; }
+      .panel-toolbar button { padding: 6px; }
+      .panel { inset: 48px 6px 26px; border-radius: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <section id="boot-screen" class="boot-screen" aria-label="LOCKHEAD boot sequence">
+    <div class="boot-content">
+      <pre class="boot-art" aria-hidden="true"></pre>
+      <div id="boot-lines" class="boot-lines"></div><span class="boot-cursor">_</span>
+    </div>
+  </section>
+
+  <main class="terminal" aria-label="LOCKHEAD terminal">
+    <header class="titlebar">
+      <span class="titlemark">root@lockhead</span><span>— tty1 (web shell)</span>
+      <span class="spacer"></span>
+      <button id="sound-button" class="tool-button" type="button" aria-label="Toggle terminal sounds">SOUND: OFF</button>
+      <button id="about-button" class="tool-button" type="button">ABOUT</button>
+      <button id="fullscreen-button" class="tool-button" type="button">FULLSCREEN</button>
+    </header>
+    <section id="screen" class="screen" aria-live="polite">
+      <div id="output" class="output"></div>
+      <form id="command-form" class="input-row" autocomplete="off">
+        <span class="prompt">root@lockhead:~#</span>
+        <input id="command-input" aria-label="Terminal command" spellcheck="false" autocapitalize="off" placeholder="type /help and press enter">
+      </form>
+    </section>
+    <footer class="statusbar"><span class="status">TTY1</span><span>WEB SHELL EMULATOR</span><span class="spacer"></span><span id="clock"></span></footer>
+  </main>
+
+  <section id="browser-panel" class="panel" aria-label="Internal browser">
+    <div id="browser-tabs" class="browser-tabs" role="tablist" aria-label="Browser tabs"></div>
+    <div class="panel-toolbar">
+      <button id="browser-back" type="button" title="Go back">← Back</button>
+      <button id="browser-forward" type="button" title="Go forward">Forward →</button>
+      <button id="browser-reload" type="button" title="Reload">↻ Reload</button>
+      <input id="browser-address" class="browser-address" type="url" aria-label="Browser address" placeholder="https://...">
+      <button id="browser-go" type="button">Go</button>
+      <button id="browser-external" type="button" title="Open in a normal browser tab">↗</button>
+      <button id="browser-close" type="button">Close ×</button>
+    </div>
+    <div id="browser-pages" class="browser-view"></div>
+  </section>
+
+  <section id="game-panel" class="panel" aria-label="Games">
+    <div class="panel-toolbar"><span class="titlemark">LOCKHEAD ARCADE</span><span class="spacer"></span><button id="game-close" type="button">Close ×</button></div>
+    <div class="game-wrap">
+      <div class="game-card">
+        <h2>PIXEL SNAKE</h2>
+        <canvas id="snake-canvas" width="420" height="420" aria-label="Snake game"></canvas>
+        <p class="game-score">SCORE: <span id="snake-score">0</span></p>
+        <p class="game-help">Arrow keys / WASD to move · Space to restart · Escape to close</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="stocks-panel" class="panel" aria-label="Stock chart viewer">
+    <div class="panel-toolbar">
+      <span class="titlemark">MARKET</span>
+      <input id="stock-symbol" class="browser-address" type="text" value="NVDA" aria-label="Stock ticker" autocomplete="off" spellcheck="false">
+      <button id="stock-load" type="button">Load chart</button>
+      <button id="stock-external" type="button" title="Open TradingView in a new tab">↗</button>
+      <button id="stock-close" type="button">Close ×</button>
+    </div>
+    <iframe id="stock-frame" class="stock-frame" title="TradingView stock chart" src="about:blank" referrerpolicy="no-referrer"></iframe>
+    <p class="stock-disclaimer">Chart from TradingView. Prices may be delayed; informational only, not investment advice.</p>
+  </section>
+
+  <section id="about-panel" class="panel about-panel" role="dialog" aria-modal="true" aria-labelledby="about-title">
+    <div class="about-card">
+      <div class="arch-kicker">TTY1 · WEB SHELL</div>
+      <h1 id="about-title">LOCKHEAD</h1>
+      <p>A terminal-inspired browser playground with a local arcade, public project viewer, and stock charts.</p>
+      <p class="about-meta">This is a browser shell emulator, not a Linux host. Commands affect only this page. Hacking effects are offline visual simulations; market charts load from TradingView.</p>
+      <div class="arch-actions">
+        <button id="about-close" class="arch-action" type="button">Back to terminal</button>
+        <a class="arch-action" href="https://github.com/ripepicjm234-hub/LOCKHEAD" target="_blank" rel="noopener noreferrer">Project source ↗</a>
+      </div>
+    </div>
+  </section>
+
+  <div id="fx-overlay" class="fx-overlay" aria-hidden="true"><div class="fx-content"><h1 id="fx-title" class="fx-title"></h1><div id="fx-log" class="fx-log"></div></div></div>
+  <div id="matrix-rain" class="matrix-rain" aria-hidden="true"><canvas id="matrix-canvas"></canvas></div>
+  <section id="welcome-screen" class="welcome-screen">
+    <div class="welcome-inner">
+      <pre aria-hidden="true"> _     ___   ____ _  _______ _____ ____  _   _
+| |   / _ \ / ___| |/ / ____|_   _|  _ \| | | |
+| |  | | | | |   | ' /|  _|   | | | |_) | | | |
+| |__| |_| | |___| . \| |___  | | |  __/| |_| |
+|_____\___/ \____|_|\_\_____| |_| |_|    \___/</pre>
+      <p>Welcome to LOCKHEAD OS!</p>
+      <button id="welcome-button" type="button">RETURN TO TERMINAL</button>
+    </div>
+  </section>
+
+  <script>
+    (() => {
+      "use strict";
+      const $ = (selector) => document.querySelector(selector);
+      const output = $("#output");
+      const screen = $("#screen");
+      const input = $("#command-input");
+      const form = $("#command-form");
+      const bootScreen = $("#boot-screen");
+      const bootArt = $(".boot-art");
+      const bootArtText = [
+        "                         .  *  .       .      *  .       .  *  .",
+        "               .       .----.      .       .       .",
+        "                    .-' @@@@ '-.          *",
+        "                 .-' @@@%%%%@@@ '-.",
+        "              .-' @@%%########%%@@ '-.       .",
+        "            .' @@%%##############%%@@ '.",
+        "          .' @@%%#######....#######%%@@ '.        *",
+        "         / @@%%######../####\\\\..######%%@@ \\\\",
+        "        / @@%%#####../########\\\\..#####%%@@ \\\\",
+        "       | @@%%####../####/\\\\####\\\\..####%%@@ |",
+        "       | @@%%###./####/    \\\\####\\\\.###%%@@ |",
+        "       | @@%%###.\\\\####\\\\    /####/ .###%%@@ |",
+        "        \\\\ @@%%####\\\\..\\\\####/.. /####%%@@ /",
+        "         \\\\ @@%%######\\\\..\\\\__/.. /######%%@@ /",
+        "          '. @@%%########....########%%@@ .'",
+        "            '. @@%%##############%%@@ .'",
+        "              '-. @@%%########%%@@ .-'",
+        "                  '-. @@@%%%%@@@ .-'",
+        "                      '------'",
+        "            /\\//\\\\//\\/\\//\\\\//\\/\\//\\\\//\\"
+      ].join("\n");
+      const bootLines = $("#boot-lines");
+      const status = $(".status");
+      const startedAt = Date.now();
+      const commands = [
+        "/help", "/clear", "/about", "/whoami", "/date", "/ls", "/pwd", "/history", "/version", "/uname", "/uptime", "/echo",
+        "/neofetch", "/banner", "/reboot", "/exit", "/hack", "/ddd", "/dxd", "/matrix",
+        "/scan", "/decrypt", "/root", "/theme", "/sysinfo", "/arch", "/archlocal", "/archsrc", "/games", "/game", "/tab", "/open", "/stocks", "/stock",
+        "/sound", "/fullscreen"
+      ];
+      const art = [
+        "  _     ___   ____ _  _______ _____ ____  _   _",
+        " | |   / _ \\\\ / ___| |/ / ____|_   _|  _ \\\\| | | |",
+        " | |  | | | | |   | ' /|  _|   | | | |_) | | | |",
+        " | |__| |_| | |___| . \\\\| |___  | | |  __/| |_| |",
+        " |_____\\\\___/ \\\\____|_|\\\\_\\\\_____| |_| |_|    \\\\___/"
+      ].join("\n");
+      let history = loadHistory();
+      let historyIndex = history.length;
+      let soundEnabled = false;
+      let audioContext;
+      let effectTimers = [];
+      let effectStop;
+      let matrixFrame = 0;
+      let snakeState = null;
+      let snakeTimer = null;
+      let browserTabs = [];
+      let activeBrowserTabId = null;
+      let browserTabSerial = 0;
+      const repoMetadata = new Map();
+
+      function loadHistory() {
+        try {
+          const value = JSON.parse(localStorage.getItem("lockhead-history") || "[]");
+          return Array.isArray(value) ? value.filter((item) => typeof item === "string").slice(-100) : [];
+        } catch (error) {
+          console.warn("Could not read terminal history:", error);
+          return [];
+        }
+      }
+      function saveHistory() {
+        try { localStorage.setItem("lockhead-history", JSON.stringify(history.slice(-100))); }
+        catch (error) { appendLine("History could not be saved in this browser.", "warn"); }
+      }
+      function appendLine(text = "", className = "") {
+        const line = document.createElement("div");
+        line.className = `line ${className}`.trim();
+        line.textContent = text;
+        output.appendChild(line);
+        screen.scrollTop = screen.scrollHeight;
+        return line;
+      }
+      function appendBlock(text, className = "") {
+        const block = document.createElement("div");
+        block.className = `line ${className}`.trim();
+        block.textContent = text;
+        output.appendChild(block);
+        screen.scrollTop = screen.scrollHeight;
+        return block;
+      }
+      function printPrompt(command) { appendLine(`root@lockhead:~# ${command}`, "prompt-line"); }
+      function playBeep(frequency = 580, duration = .035) {
+        if (!soundEnabled) return;
+        try {
+          audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(.035, audioContext.currentTime);
+          gain.gain.exponentialRampToValueAtTime(.001, audioContext.currentTime + duration);
+          oscillator.connect(gain); gain.connect(audioContext.destination);
+          oscillator.start(); oscillator.stop(audioContext.currentTime + duration);
+        } catch (error) { appendLine(`Sound unavailable: ${error.message}`, "warn"); }
+      }
+      function setStatus(text) { status.textContent = text; }
+      function focusInput() { if (!$("#browser-panel").classList.contains("open") && !$("#game-panel").classList.contains("open")) input.focus(); }
+      function showWelcome() { $("#welcome-screen").classList.add("open"); input.disabled = true; setStatus("SESSION PAUSED"); }
+      function returnTerminal() { $("#welcome-screen").classList.remove("open"); input.disabled = false; focusInput(); setStatus("SYSTEM READY"); }
+      function openAbout() {
+        closePanels();
+        $("#about-panel").classList.add("open");
+        setStatus("ABOUT");
+        $("#about-close").focus();
+      }
+      function currentBrowserTab() { return browserTabs.find((tab) => tab.id === activeBrowserTabId); }
+      function renderBrowserTabs() {
+        const strip = $("#browser-tabs");
+        strip.replaceChildren();
+        browserTabs.forEach((tab) => {
+          const item = document.createElement("div");
+          item.className = `browser-tab${tab.id === activeBrowserTabId ? " active" : ""}`;
+          const select = document.createElement("button");
+          select.className = "browser-tab-select";
+          select.type = "button";
+          select.setAttribute("role", "tab");
+          select.setAttribute("aria-selected", String(tab.id === activeBrowserTabId));
+          select.textContent = tab.title;
+          select.addEventListener("click", () => activateBrowserTab(tab.id));
+          const close = document.createElement("button");
+          close.className = "browser-tab-close";
+          close.type = "button";
+          close.setAttribute("aria-label", `Close ${tab.title}`);
+          close.textContent = "×";
+          close.addEventListener("click", () => closeBrowserTab(tab.id));
+          item.append(select, close);
+          strip.appendChild(item);
+        });
+        const add = document.createElement("button");
+        add.className = "browser-new-tab";
+        add.type = "button";
+        add.setAttribute("aria-label", "Open new browser tab");
+        add.textContent = "+";
+        add.addEventListener("click", () => createBrowserTab());
+        strip.appendChild(add);
+      }
+      function activateBrowserTab(id) {
+        const tab = browserTabs.find((item) => item.id === id);
+        if (!tab) return;
+        activeBrowserTabId = id;
+        browserTabs.forEach((item) => item.page.classList.toggle("active", item.id === id));
+        $("#browser-address").value = tab.url;
+        renderBrowserTabs();
+      }
+      function createBrowserTab(url = "") {
+        const page = document.createElement("div");
+        page.className = "browser-page";
+        const repoView = document.createElement("div");
+        repoView.className = "repo-view";
+        repoView.setAttribute("aria-live", "polite");
+        const frame = document.createElement("iframe");
+        frame.className = "browser-frame";
+        frame.title = "External website";
+        frame.referrerPolicy = "no-referrer";
+        page.append(repoView, frame);
+        $("#browser-pages").appendChild(page);
+        const tab = {
+          id: ++browserTabSerial,
+          title: "New Tab",
+          url: "",
+          history: [],
+          historyIndex: -1,
+          page,
+          repoView,
+          frame,
+          loadId: 0
+        };
+        browserTabs.push(tab);
+        activateBrowserTab(tab.id);
+        $("#browser-panel").classList.add("open");
+        setStatus("INTERNAL BROWSER");
+        if (url) navigateBrowserTab(tab, url);
+        else renderBrowserHome(tab);
+        return tab;
+      }
+      function closeBrowserTab(id) {
+        const index = browserTabs.findIndex((tab) => tab.id === id);
+        if (index < 0) return;
+        const [tab] = browserTabs.splice(index, 1);
+        tab.frame.src = "about:blank";
+        tab.page.remove();
+        if (!browserTabs.length) {
+          activeBrowserTabId = null;
+          $("#browser-panel").classList.remove("open");
+          setStatus("SYSTEM READY");
+          focusInput();
+          return;
+        }
+        if (activeBrowserTabId === id) activateBrowserTab(browserTabs[Math.min(index, browserTabs.length - 1)].id);
+        renderBrowserTabs();
+      }
+      function renderBrowserHome(tab) {
+        tab.title = "New Tab";
+        tab.frame.src = "about:blank";
+        tab.frame.classList.remove("visible");
+        tab.repoView.replaceChildren();
+        const heading = document.createElement("div");
+        heading.className = "repo-heading";
+        const title = document.createElement("h2");
+        title.textContent = "LOCKHEAD BROWSER";
+        const hint = document.createElement("span");
+        hint.textContent = "Enter a URL above, or open the ARCH repository.";
+        heading.append(title, hint);
+        tab.repoView.append(heading);
+        const localButton = document.createElement("button");
+        localButton.className = "repo-entry-name";
+        localButton.type = "button";
+        localButton.textContent = "Open local ARCH games";
+        localButton.addEventListener("click", () => navigateBrowserTab(tab, localArchUrl()));
+        const sourceButton = document.createElement("button");
+        sourceButton.className = "repo-entry-name";
+        sourceButton.type = "button";
+        sourceButton.textContent = "View ARCH source on GitHub";
+        sourceButton.addEventListener("click", () => navigateBrowserTab(tab, "https://github.com/ripepicjm234-hub/ARCH"));
+        tab.repoView.append(localButton, sourceButton);
+        renderBrowserTabs();
+      }
+      function parseGitHubRepo(url) {
+        if (url.hostname !== "github.com") return null;
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts.length < 2) return null;
+        const [owner, repo, view, ...rest] = parts;
+        if (view && view !== "tree" && view !== "blob") return null;
+        let branch = "";
+        let path = "";
+        try {
+          if (view && rest.length) {
+            branch = decodeURIComponent(rest.shift());
+            path = rest.map(decodeURIComponent).join("/");
+          }
+        } catch {
+          return null;
+        }
+        return { owner, repo, branch, path, itemType: view };
+      }
+      function addRepoHeading(tab, titleText, subtitle = "") {
+        const heading = document.createElement("div");
+        heading.className = "repo-heading";
+        const title = document.createElement("h2");
+        title.textContent = titleText;
+        heading.appendChild(title);
+        if (subtitle) {
+          const detail = document.createElement("span");
+          detail.textContent = subtitle;
+          heading.appendChild(detail);
+        }
+        tab.repoView.appendChild(heading);
+      }
+      function addRepoEntry(tab, name, meta, url) {
+        const row = document.createElement("div");
+        row.className = "repo-entry";
+        const open = document.createElement("button");
+        open.className = "repo-entry-name";
+        open.type = "button";
+        open.textContent = name;
+        open.addEventListener("click", () => navigateBrowserTab(tab, url));
+        const detail = document.createElement("span");
+        detail.className = "repo-entry-meta";
+        detail.textContent = meta;
+        const newTab = document.createElement("button");
+        newTab.className = "repo-entry-new";
+        newTab.type = "button";
+        newTab.title = `Open ${name} in a new tab`;
+        newTab.setAttribute("aria-label", `Open ${name} in a new tab`);
+        newTab.textContent = "↗";
+        newTab.addEventListener("click", () => createBrowserTab(url));
+        row.append(open, detail, newTab);
+        tab.repoView.appendChild(row);
+      }
+      function decodeGitHubFile(content) {
+        const binary = atob(content.replace(/\s/g, ""));
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+      }
+      async function renderGitHubRepo(tab, parsed, requestId) {
+        const apiBase = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+        let metadata = repoMetadata.get(`${parsed.owner}/${parsed.repo}`);
+        if (!metadata) {
+          const response = await fetch(apiBase, { headers: { Accept: "application/vnd.github+json" } });
+          if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+          metadata = await response.json();
+          repoMetadata.set(`${parsed.owner}/${parsed.repo}`, metadata);
+        }
+        const branch = parsed.branch || metadata.default_branch;
+        const branchUrl = `https://github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/tree/${encodeURIComponent(branch)}`;
+        const fileUrl = `https://github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/blob/${encodeURIComponent(branch)}`;
+        const contentPath = parsed.path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+        const endpoint = `${apiBase}/contents${contentPath ? `/${contentPath}` : ""}?ref=${encodeURIComponent(branch)}`;
+        const response = await fetch(endpoint, { headers: { Accept: "application/vnd.github+json" } });
+        if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+        const contents = await response.json();
+        if (requestId !== tab.loadId) return;
+        tab.repoView.replaceChildren();
+        let homepageUrl = "";
+        try {
+          const homepage = new URL(metadata.homepage);
+          if (homepage.protocol === "http:" || homepage.protocol === "https:") homepageUrl = homepage.href;
+        } catch { /* No published homepage is configured. */ }
+        if (!parsed.path) {
+          const landing = document.createElement("section");
+          landing.className = "arch-landing";
+          const kicker = document.createElement("div");
+          kicker.className = "arch-kicker";
+          kicker.textContent = `PUBLIC PROJECT · ${parsed.owner}/${parsed.repo}`;
+          const title = document.createElement("h1");
+          title.textContent = parsed.repo;
+          const description = document.createElement("p");
+          description.textContent = metadata.description || "Public GitHub repository";
+          const note = document.createElement("p");
+          note.textContent = homepageUrl
+            ? "Browse the project files below, or open its published homepage."
+            : "No public website is configured for this repository yet. This page shows the project and its source files.";
+          const actions = document.createElement("div");
+          actions.className = "arch-actions";
+          const filesLink = document.createElement("button");
+          filesLink.className = "arch-action";
+          filesLink.type = "button";
+          filesLink.textContent = "Browse project files";
+          filesLink.addEventListener("click", () => tab.repoView.querySelector(".repo-list")?.scrollIntoView({ behavior: "smooth" }));
+          const githubLink = document.createElement("a");
+          githubLink.className = "arch-action";
+          githubLink.href = `https://github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+          githubLink.target = "_blank";
+          githubLink.rel = "noopener noreferrer";
+          githubLink.textContent = "Open on GitHub ↗";
+          actions.append(filesLink, githubLink);
+          if (homepageUrl) {
+            const homepageLink = document.createElement("a");
+            homepageLink.className = "arch-action";
+            homepageLink.href = homepageUrl;
+            homepageLink.target = "_blank";
+            homepageLink.rel = "noopener noreferrer";
+            homepageLink.textContent = "Live site ↗";
+            actions.appendChild(homepageLink);
+          }
+          landing.append(kicker, title, description, note, actions);
+          tab.repoView.appendChild(landing);
+        } else {
+          addRepoHeading(tab, `${parsed.owner}/${parsed.repo}`, `${metadata.description || "Public GitHub repository"} · branch ${branch}`);
+        }
+        if (parsed.path) {
+          const canonical = document.createElement("a");
+          canonical.className = "repo-link";
+          canonical.href = `https://github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+          canonical.target = "_blank";
+          canonical.rel = "noopener noreferrer";
+          canonical.textContent = "View repository on GitHub ↗";
+          tab.repoView.appendChild(canonical);
+        }
+        if (Array.isArray(contents)) {
+          const list = document.createElement("div");
+          list.className = "repo-list";
+          if (parsed.path) {
+            const parent = parsed.path.split("/").slice(0, -1).filter(Boolean).join("/");
+            addRepoEntry(tab, "..", "parent directory", `${branchUrl}${parent ? `/${parent.split("/").map(encodeURIComponent).join("/")}` : ""}`);
+          }
+          contents.sort((a, b) => (a.type === "dir" ? 0 : 1) - (b.type === "dir" ? 0 : 1) || a.name.localeCompare(b.name));
+          contents.forEach((entry) => {
+            const nextPath = [...parsed.path.split("/").filter(Boolean), entry.name].map(encodeURIComponent).join("/");
+            const base = entry.type === "dir" ? branchUrl : fileUrl;
+            addRepoEntry(tab, entry.name, entry.type, `${base}/${nextPath}`);
+          });
+          list.append(...Array.from(tab.repoView.querySelectorAll(".repo-entry")));
+          tab.repoView.appendChild(list);
+          if (!contents.length) {
+            const empty = document.createElement("p");
+            empty.className = "repo-message";
+            empty.textContent = "This directory is empty.";
+            tab.repoView.appendChild(empty);
+          }
+          return;
+        }
+        let text;
+        if (contents.encoding === "base64" && contents.content) text = decodeGitHubFile(contents.content);
+        else if (contents.download_url) {
+          const rawResponse = await fetch(contents.download_url);
+          if (!rawResponse.ok) throw new Error(`File download returned HTTP ${rawResponse.status}`);
+          text = await rawResponse.text();
+        } else text = "This file cannot be previewed.";
+        if (requestId !== tab.loadId) return;
+        const file = document.createElement("div");
+        file.className = "repo-file";
+        const name = document.createElement("div");
+        name.className = "repo-message";
+        name.textContent = `${contents.path} · ${contents.size} bytes`;
+        const pre = document.createElement("pre");
+        pre.textContent = text;
+        file.append(name, pre);
+        tab.repoView.appendChild(file);
+      }
+      async function renderBrowserTab(tab) {
+        const requestId = ++tab.loadId;
+        let url;
+        try { url = new URL(tab.url); }
+        catch { renderBrowserHome(tab); return; }
+        const parsed = parseGitHubRepo(url);
+        if (!parsed) {
+          tab.repoView.style.display = "none";
+          tab.frame.classList.add("visible");
+          tab.frame.src = tab.url;
+          return;
+        }
+        tab.frame.src = "about:blank";
+        tab.frame.classList.remove("visible");
+        tab.repoView.style.display = "block";
+        tab.repoView.replaceChildren();
+        const loading = document.createElement("p");
+        loading.className = "repo-loading";
+        loading.textContent = `Connecting to GitHub API: ${parsed.owner}/${parsed.repo} ...`;
+        tab.repoView.appendChild(loading);
+        try { await renderGitHubRepo(tab, parsed, requestId); }
+        catch (error) {
+          if (requestId !== tab.loadId) return;
+          tab.repoView.replaceChildren();
+          addRepoHeading(tab, "Repository unavailable");
+          const message = document.createElement("p");
+          message.className = "repo-message";
+          message.textContent = `${error.message}. Check your connection, repository visibility, or GitHub API rate limit.`;
+          const link = document.createElement("a");
+          link.className = "repo-link";
+          link.href = tab.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = "Open on GitHub in a new tab ↗";
+          tab.repoView.append(message, link);
+        }
+      }
+      function navigateBrowserTab(tab, value, addHistory = true) {
+        let url;
+        try {
+          url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`);
+          if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only HTTP and HTTPS addresses are supported.");
+        } catch (error) {
+          if (tab) {
+            tab.repoView.style.display = "block";
+            tab.frame.classList.remove("visible");
+            tab.repoView.replaceChildren();
+            const message = document.createElement("p");
+            message.className = "repo-message";
+            message.textContent = `Invalid address: ${error.message}`;
+            tab.repoView.appendChild(message);
+          } else appendLine(`Invalid browser address: ${error.message}`, "error");
+          return;
+        }
+        tab.url = url.href;
+        tab.title = url.hostname === "github.com"
+          ? (url.pathname.split("/").filter(Boolean).slice(0, 2).join("/") || "GitHub")
+          : url.hostname;
+        if (addHistory) {
+          tab.history = tab.history.slice(0, tab.historyIndex + 1);
+          tab.history.push(tab.url);
+          tab.historyIndex = tab.history.length - 1;
+        }
+        if (tab.id === activeBrowserTabId) $("#browser-address").value = tab.url;
+        renderBrowserTabs();
+        renderBrowserTab(tab);
+      }
+      function openBrowser(url = "https://github.com/ripepicjm234-hub/ARCH") {
+        closePanels();
+        createBrowserTab(url);
+      }
+      function localArchUrl() { return new URL("arch/", window.location.href).href; }
+      function openOfficialArch() {
+        const url = "https://arch.wuaze.com/";
+        window.open(url, "_blank", "noopener,noreferrer");
+        appendLine("Official ARCH site:");
+        appendExternalLink(url, url);
+        appendLine("Source code:");
+        appendExternalLink("https://github.com/ripepicjm234-hub/ARCH", "ripepicjm234-hub/ARCH");
+      }
+      function appendExternalLink(url, label) {
+        const line = document.createElement("div");
+        line.className = "line";
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = label;
+        line.appendChild(link);
+        output.appendChild(line);
+        screen.scrollTop = screen.scrollHeight;
+      }
+      function closePanels() {
+        $("#browser-panel").classList.remove("open");
+        $("#game-panel").classList.remove("open");
+        $("#stocks-panel").classList.remove("open");
+        $("#about-panel").classList.remove("open");
+        $("#stock-frame").src = "about:blank";
+        stopSnake();
+        setStatus("SYSTEM READY");
+        focusInput();
+      }
+      function getTradingViewSymbol(value) {
+        const symbol = value.trim().toUpperCase();
+        if (/^[A-Z0-9._-]{1,20}:[A-Z0-9.^=_-]{1,20}$/.test(symbol)) return symbol;
+        if (/^[A-Z0-9.^=_-]{1,20}$/.test(symbol)) return `NASDAQ:${symbol}`;
+        return null;
+      }
+      function loadStockChart(value = $("#stock-symbol").value) {
+        const tickerInput = $("#stock-symbol");
+        const symbol = getTradingViewSymbol(value);
+        const disclaimer = $(".stock-disclaimer");
+        if (!symbol) {
+          tickerInput.setCustomValidity("Enter a ticker such as NVDA or an exchange:ticker such as NASDAQ:NVDA.");
+          tickerInput.reportValidity();
+          return;
+        }
+        tickerInput.setCustomValidity("");
+        tickerInput.value = symbol;
+        const params = new URLSearchParams({
+          symbol,
+          interval: "D",
+          theme: "dark",
+          style: "1",
+          locale: "en",
+          allow_symbol_change: "true",
+          hide_top_toolbar: "0",
+          hide_side_toolbar: "0",
+          withdateranges: "1",
+          hideideas: "1",
+          toolbarbg: "0b0e11",
+          save_image: "0"
+        });
+        $("#stock-frame").src = `https://s.tradingview.com/widgetembed/?${params}`;
+        disclaimer.textContent = "Chart from TradingView. Prices may be delayed; informational only, not investment advice.";
+        setStatus(`MARKET: ${symbol}`);
+      }
+      function openStocks(ticker = "NVDA") {
+        closePanels();
+        $("#stocks-panel").classList.add("open");
+        $("#stock-symbol").value = ticker;
+        loadStockChart(ticker);
+        $("#stock-symbol").focus();
+        $("#stock-symbol").select();
+      }
+      function launchSnake() {
+        closePanels();
+        $("#game-panel").classList.add("open");
+        startSnake();
+        setStatus("ARCADE: PIXEL SNAKE");
+      }
+      function startSnake() {
+        stopSnake();
+        const canvas = $("#snake-canvas");
+        const context = canvas.getContext("2d");
+        const size = 21;
+        const cells = canvas.width / size;
+        snakeState = {
+          context, size, cells,
+          body: [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }],
+          direction: { x: 1, y: 0 }, nextDirection: { x: 1, y: 0 },
+          food: { x: 15, y: 10 }, score: 0, stopped: false
+        };
+        $("#snake-score").textContent = "0";
+        drawSnake();
+        snakeTimer = window.setInterval(tickSnake, 115);
+      }
+      function stopSnake() {
+        if (snakeTimer !== null) window.clearInterval(snakeTimer);
+        snakeTimer = null;
+        snakeState = null;
+      }
+      function drawSnake() {
+        if (!snakeState) return;
+        const { context: ctx, size, cells, body, food } = snakeState;
+        ctx.fillStyle = "#090909"; ctx.fillRect(0, 0, size * cells, size * cells);
+        ctx.strokeStyle = "#181014"; ctx.lineWidth = 1;
+        for (let i = 0; i <= cells; i++) {
+          ctx.beginPath(); ctx.moveTo(i * size, 0); ctx.lineTo(i * size, size * cells); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i * size); ctx.lineTo(size * cells, i * size); ctx.stroke();
+        }
+        ctx.fillStyle = "#ff626b"; ctx.fillRect(food.x * size + 3, food.y * size + 3, size - 6, size - 6);
+        body.forEach((part, index) => {
+          ctx.fillStyle = index ? "#a52d38" : "#c1eaa0";
+          ctx.fillRect(part.x * size + 1, part.y * size + 1, size - 2, size - 2);
+        });
+      }
+      function tickSnake() {
+        if (!snakeState || snakeState.stopped) return;
+        const s = snakeState;
+        s.direction = s.nextDirection;
+        const head = { x: s.body[0].x + s.direction.x, y: s.body[0].y + s.direction.y };
+        const ate = head.x === s.food.x && head.y === s.food.y;
+        if (head.x < 0 || head.y < 0 || head.x >= s.cells || head.y >= s.cells ||
+            s.body.slice(0, ate ? undefined : -1).some((part) => part.x === head.x && part.y === head.y)) {
+          s.stopped = true;
+          appendLine(`Snake game over — score ${s.score}. Press Space to restart.`, "warn");
+          return;
+        }
+        s.body.unshift(head);
+        if (ate) {
+          s.score++;
+          $("#snake-score").textContent = String(s.score);
+          do { s.food = { x: Math.floor(Math.random() * s.cells), y: Math.floor(Math.random() * s.cells) }; }
+          while (s.body.some((part) => part.x === s.food.x && part.y === s.food.y));
+        } else s.body.pop();
+        drawSnake();
+      }
+      function startBoot() {
+        clearEffects();
+        $("#welcome-screen").classList.remove("open");
+        closePanels();
+        input.disabled = true;
+        bootScreen.style.display = "flex";
+        bootLines.textContent = "";
+        bootArt.textContent = "";
+        bootScreen.classList.remove("leaving");
+        const sequence = [
+          { element: bootArt, text: `${bootArtText}\n`, delay: 4 },
+          { element: bootLines, text: "          LOCKHEAD\n       SYSTEM INITIALIZING\n     /\\/\\//\\\\//\\/\\//\\\\\n\nLOCKHEAD Linux 6.8.12-lockhead (x86_64; web emulator)\n\nroot@lockhead:~# ", delay: 14 }
+        ];
+        let part = 0, position = 0;
+        const type = () => {
+          if (part >= sequence.length) {
+            window.setTimeout(() => {
+              bootScreen.classList.add("leaving");
+              window.setTimeout(() => {
+                bootScreen.style.display = "none";
+                input.disabled = false;
+                output.replaceChildren();
+                appendLine("Welcome to LOCKHEAD OS!", "good");
+                appendLine("Linux lockhead 6.8.12-lockhead x86_64 — browser shell emulator; no host access.", "muted");
+                appendLine("Type /help for commands. Use /stocks NVDA to view a market chart.", "muted");
+                focusInput();
+              }, 560);
+            }, 350);
+            return;
+          }
+          const current = sequence[part];
+          current.element.textContent += current.text[position++];
+          if (position >= current.text.length) { part++; position = 0; }
+          window.setTimeout(type, current.text[position - 1] === "\n" ? 90 : current.delay);
+        };
+        type();
+      }
+      function clearEffects() {
+        effectTimers.forEach((timer) => window.clearInterval(timer));
+        effectTimers = [];
+        if (effectStop) { effectStop(); effectStop = null; }
+        $("#fx-overlay").classList.remove("active", "glitch");
+        $("#matrix-rain").classList.remove("active");
+        if (matrixFrame) { cancelAnimationFrame(matrixFrame); matrixFrame = 0; }
+      }
+      function runMovie(mode) {
+        clearEffects();
+        const overlay = $("#fx-overlay");
+        const log = $("#fx-log");
+        overlay.classList.add("active", "glitch");
+        $("#fx-title").textContent = `root@lockhead:~# /${mode === "extreme" ? "ddd" : "hack"} — OFFLINE VISUAL REPLAY`;
+        log.textContent = "";
+        input.disabled = true;
+        setStatus("OFFLINE VISUAL REPLAY");
+        const steps = mode === "extreme" ? 48 : 25;
+        let count = 0;
+        const messages = [
+          "[00:00:00.000] lockhead-demo[1842]: replay start",
+          "[00:00:00.018] mode=visual scope=fictional network=disabled",
+          "[00:00:00.037] endpoint 192.0.2.42 (documentation range)",
+          "[00:00:00.083] virtual interface: demo0 [I/O disabled]",
+          "[00:00:00.124] key exchange: synthetic sample generated",
+          "[00:00:00.190] decrypt: rendering sample payload...",
+          "[00:00:00.242] result: no host or account accessed"
+        ];
+        const timer = window.setInterval(() => {
+          const hex = Array.from({ length: mode === "extreme" ? 64 : 28 }, () => "0123456789ABCDEF"[Math.floor(Math.random() * 16)]).join("");
+          const row = count % 4 === 0 ? messages[(count / 4 | 0) % messages.length] : hex;
+          log.textContent += `${row}\n`;
+          log.scrollTop = log.scrollHeight;
+          playBeep(220 + Math.random() * 500, .025);
+          count++;
+          if (count >= steps) {
+            window.clearInterval(timer);
+            effectTimers = effectTimers.filter((item) => item !== timer);
+            log.textContent += "\n";
+            const success = document.createElement("div");
+            success.className = "fx-success";
+            success.textContent = "DEMO ACCESS GRANTED (OFFLINE)";
+            log.appendChild(success);
+            window.setTimeout(() => {
+              overlay.classList.remove("active", "glitch");
+              input.disabled = false;
+              setStatus("SYSTEM READY");
+              effectStop = null;
+              focusInput();
+            }, 900);
+          }
+        }, mode === "extreme" ? 65 : 115);
+        effectTimers.push(timer);
+        effectStop = () => { window.clearInterval(timer); input.disabled = false; setStatus("SYSTEM READY"); };
+      }
+      function startMatrix() {
+        clearEffects();
+        const wrapper = $("#matrix-rain"), canvas = $("#matrix-canvas"), ctx = canvas.getContext("2d");
+        wrapper.classList.add("active");
+        input.disabled = true;
+        setStatus("MATRIX VISUALIZATION");
+        const resize = () => {
+          canvas.width = wrapper.clientWidth * devicePixelRatio;
+          canvas.height = wrapper.clientHeight * devicePixelRatio;
+          ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        };
+        resize();
+        const columns = Math.max(1, Math.floor(wrapper.clientWidth / 16));
+        const drops = Array.from({ length: columns }, () => Math.random() * -40);
+        let frames = 0;
+        const draw = () => {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+          ctx.fillRect(0, 0, wrapper.clientWidth, wrapper.clientHeight);
+          ctx.fillStyle = "#a9f5b5";
+          ctx.font = "14px monospace";
+          drops.forEach((y, x) => {
+            ctx.fillText("01アイウエオ"[Math.floor(Math.random() * 9)], x * 16, y * 16);
+            drops[x] = y * 16 > wrapper.clientHeight && Math.random() > .975 ? 0 : y + .65;
+          });
+          frames++;
+          if (frames < 330 && wrapper.classList.contains("active")) matrixFrame = requestAnimationFrame(draw);
+          else {
+            wrapper.classList.remove("active");
+            matrixFrame = 0;
+            input.disabled = false;
+            setStatus("SYSTEM READY");
+            focusInput();
+          }
+        };
+        matrixFrame = requestAnimationFrame(draw);
+        effectStop = () => { wrapper.classList.remove("active"); input.disabled = false; setStatus("SYSTEM READY"); };
+      }
+      function setTheme(name) {
+        const colors = { red: ["#ff414b", "#a62a32", "#ff7278"], green: ["#62e88b", "#267344", "#a4ffbd"], amber: ["#d6ad27", "#8e7018", "#f2d66d"], blue: ["#65b9ff", "#286a9c", "#a1d6ff"] };
+        if (!colors[name]) { appendLine("Usage: /theme red|green|amber|blue", "warn"); return; }
+        const [fg, dim, bright] = colors[name];
+        document.documentElement.style.setProperty("--fg", fg);
+        document.documentElement.style.setProperty("--dim", dim);
+        document.documentElement.style.setProperty("--bright", bright);
+        appendLine(`Terminal theme set to ${name}.`, "good");
+      }
+      function runCommand(raw) {
+        const trimmed = raw.trim();
+        if (!trimmed) return;
+        history.push(trimmed);
+        history = history.slice(-100);
+        historyIndex = history.length;
+        saveHistory();
+        printPrompt(trimmed);
+        const [command, ...args] = trimmed.split(/\s+/);
+        const arg = args[0]?.toLowerCase();
+        playBeep();
+        switch (command.toLowerCase()) {
+          case "/help":
+            appendBlock([
+              "COMMANDS",
+              "  /help                 list available commands",
+              "  /clear                clear the terminal",
+              "  /about /whoami        identity and project info",
+              "  /date /pwd /ls        time and virtual filesystem",
+              "  /version /uname      shell and emulated OS version",
+              "  /uptime /echo        page uptime and print text",
+              "  /history              show saved command history",
+              "  /neofetch /sysinfo    system summary",
+              "  /banner               print the LOCKHEAD logo",
+              "  /theme <color>        red, green, amber, or blue",
+              "  /hack /ddd /dxd       fictional visual-only sequence",
+              "  /scan /decrypt /root  local visual simulations",
+              "  /matrix               falling-code visual effect",
+              "  /arch                 open the official ARCH website",
+              "  /archlocal            open the local non-proxy games catalogue",
+              "  /archsrc              view ARCH source on GitHub",
+              "  /tab                  open a new internal browser tab",
+              "  /open <url>           open a URL in a new browser tab",
+              "  /games                list built-in games",
+              "  /game snake           play the local Pixel Snake game",
+              "  /stocks [ticker]      view a stock chart (default NVDA)",
+              "  /sound /fullscreen    toggle sound or fullscreen",
+              "  /reboot /exit         replay boot or show welcome screen",
+              "",
+              "Use ↑/↓ for history and Tab to complete commands."
+            ].join("\n"));
+            break;
+          case "/clear": output.replaceChildren(); break;
+          case "/about": openAbout(); break;
+          case "/whoami": appendLine("root (local demo user)", "good"); break;
+          case "/date": appendLine(new Date().toString()); break;
+          case "/version": appendLine("LOCKHEAD web shell 1.1.0 (browser emulation)"); break;
+          case "/uname": appendLine("Linux lockhead 6.8.12-lockhead #1 SMP x86_64 GNU/Linux (emulated)"); break;
+          case "/uptime": {
+            const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            appendLine(`up ${hours}h ${String(minutes).padStart(2, "0")}m ${String(elapsed % 60).padStart(2, "0")}s (this page)`);
+            break;
+          }
+          case "/echo": appendLine(args.join(" ")); break;
+          case "/ls": appendBlock("README.md  index.html  games/  docs/  ARCH (remote link)"); break;
+          case "/pwd": appendLine("/home/root/lockhead"); break;
+          case "/history": history.forEach((item, index) => appendLine(`${String(index + 1).padStart(3, " ")}  ${item}`, "muted")); break;
+          case "/banner": appendBlock(art, "ascii"); break;
+          case "/neofetch":
+          case "/sysinfo":
+            appendBlock([
+              "        .--.          root@lockhead",
+              "       |o_o |         ------------------",
+              "       |:_/ |         OS: LOCKHEAD OS (web simulation)",
+              "      //   \\\\ \\\\        Kernel: Browser Runtime",
+              "     (|     | )        Shell: LOCKHEAD SH",
+              "    /'\\\\_   _/`\\\\       Theme: Red Terminal",
+              "    \\\\___)=(___/        Network: Simulation only"
+            ].join("\n"), "good");
+            break;
+          case "/hack": runMovie("cinematic"); break;
+          case "/ddd":
+          case "/dxd": runMovie("extreme"); break;
+          case "/matrix": startMatrix(); break;
+          case "/scan": appendBlock("lockhead-demo: scan profile=local-sample\n[OK] Synthetic inventory loaded\n[OK] Network I/O disabled\n[OK] No devices or services queried", "good"); break;
+          case "/decrypt": runMovie("cinematic"); break;
+          case "/root": appendBlock("uid=0(root) gid=0(root) groups=0(root)\nNOTICE: simulated shell identity; no host privileges are granted.", "good"); break;
+          case "/theme": setTheme(arg || ""); break;
+          case "/arch": openOfficialArch(); break;
+          case "/archlocal": openBrowser(localArchUrl()); break;
+          case "/archsrc": openBrowser("https://github.com/ripepicjm234-hub/ARCH"); break;
+          case "/tab": closePanels(); createBrowserTab(); break;
+          case "/open":
+            if (args.length) openBrowser(args.join(" "));
+            else appendLine("Usage: /open https://example.com", "warn");
+            break;
+          case "/stocks":
+          case "/stock": openStocks(args[0] || "NVDA"); break;
+          case "/games":
+            appendBlock("LOCAL ARCADE\n  /game snake   Pixel Snake — arrow keys or WASD\nGames run locally in this page. No external game sites are loaded.", "good");
+            break;
+          case "/game":
+            if (arg === "snake") launchSnake();
+            else appendLine("Usage: /game snake", "warn");
+            break;
+          case "/sound":
+            soundEnabled = !soundEnabled;
+            updateSoundButton();
+            appendLine(`Terminal sounds ${soundEnabled ? "enabled" : "muted"}.`, "good");
+            break;
+          case "/fullscreen": toggleFullscreen(); break;
+          case "/reboot": startBoot(); break;
+          case "/exit": showWelcome(); break;
+          default: appendLine(`Command not found: ${command}. Try /help.`, "error");
+        }
+      }
+      function updateSoundButton() { $("#sound-button").textContent = `SOUND: ${soundEnabled ? "ON" : "OFF"}`; }
+      async function toggleFullscreen() {
+        try {
+          if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+          else await document.exitFullscreen();
+        } catch (error) { appendLine(`Fullscreen unavailable: ${error.message}`, "warn"); }
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const command = input.value;
+        input.value = "";
+        runCommand(command);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          historyIndex = Math.max(0, historyIndex - 1);
+          input.value = history[historyIndex] || "";
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          historyIndex = Math.min(history.length, historyIndex + 1);
+          input.value = history[historyIndex] || "";
+        } else if (event.key === "Tab") {
+          event.preventDefault();
+          const current = input.value.trim().split(/\s+/)[0].toLowerCase();
+          const matches = commands.filter((item) => item.startsWith(current));
+          if (matches.length === 1) input.value = matches[0] + " ";
+          else if (matches.length > 1) appendLine(matches.join("  "), "muted");
+        } else if (event.key === "Escape" && effectStop) {
+          clearEffects();
+          input.disabled = false;
+          setStatus("SYSTEM READY");
+          appendLine("Visual effect stopped.", "muted");
+          focusInput();
+        }
+      });
+      $("#sound-button").addEventListener("click", () => { soundEnabled = !soundEnabled; updateSoundButton(); playBeep(660); });
+      $("#about-button").addEventListener("click", openAbout);
+      $("#about-close").addEventListener("click", closePanels);
+      $("#fullscreen-button").addEventListener("click", toggleFullscreen);
+      $("#browser-close").addEventListener("click", closePanels);
+      $("#browser-back").addEventListener("click", () => {
+        const tab = currentBrowserTab();
+        if (!tab || tab.historyIndex <= 0) return;
+        tab.historyIndex--;
+        tab.url = tab.history[tab.historyIndex];
+        $("#browser-address").value = tab.url;
+        renderBrowserTab(tab);
+      });
+      $("#browser-forward").addEventListener("click", () => {
+        const tab = currentBrowserTab();
+        if (!tab || tab.historyIndex >= tab.history.length - 1) return;
+        tab.historyIndex++;
+        tab.url = tab.history[tab.historyIndex];
+        $("#browser-address").value = tab.url;
+        renderBrowserTab(tab);
+      });
+      $("#browser-reload").addEventListener("click", () => {
+        const tab = currentBrowserTab();
+        if (tab?.url) renderBrowserTab(tab);
+      });
+      $("#browser-go").addEventListener("click", () => {
+        const tab = currentBrowserTab() || createBrowserTab();
+        navigateBrowserTab(tab, $("#browser-address").value);
+      });
+      $("#browser-address").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const tab = currentBrowserTab() || createBrowserTab();
+          navigateBrowserTab(tab, event.currentTarget.value);
+        }
+      });
+      $("#browser-external").addEventListener("click", () => {
+        const tab = currentBrowserTab();
+        if (tab?.url) window.open(tab.url, "_blank", "noopener,noreferrer");
+      });
+      $("#stock-load").addEventListener("click", () => loadStockChart());
+      $("#stock-symbol").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          loadStockChart();
+        }
+      });
+      $("#stock-external").addEventListener("click", () => {
+        const symbol = getTradingViewSymbol($("#stock-symbol").value);
+        if (symbol) window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}`, "_blank", "noopener,noreferrer");
+      });
+      $("#stock-close").addEventListener("click", closePanels);
+      $("#game-close").addEventListener("click", closePanels);
+      $("#welcome-button").addEventListener("click", returnTerminal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && $("#about-panel").classList.contains("open")) {
+          closePanels();
+          return;
+        }
+        if ($("#game-panel").classList.contains("open")) {
+          if (event.key === "Escape") { closePanels(); return; }
+          if (event.key === " " && snakeState?.stopped) { event.preventDefault(); startSnake(); return; }
+          const map = {
+            ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 },
+            ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 },
+            ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 },
+            ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }
+          };
+          const direction = map[event.key] || map[event.key.toLowerCase()];
+          if (direction && snakeState && direction.x !== -snakeState.direction.x && direction.y !== -snakeState.direction.y) {
+            event.preventDefault();
+            snakeState.nextDirection = direction;
+          }
+        }
+      });
+      $("#clock").textContent = new Date().toLocaleTimeString();
+      window.setInterval(() => { $("#clock").textContent = new Date().toLocaleTimeString(); }, 1000);
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("button") || event.target.closest("a")) return;
+        focusInput();
+      });
+      startBoot();
+    })();
+  </script>
+</body>
+</html>
